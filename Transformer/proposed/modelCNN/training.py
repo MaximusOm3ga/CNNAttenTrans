@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from Transformer.proposed.modelCNN.model import AutoencoderTokenExtractor
-from Transformer.proposed.modelCNN.data import train_loader, val_loader
+from Transformer.proposed.modelCNN.data_load import train_loader, val_loader
 
 LR = 1e-3
 EPOCHS = 600
