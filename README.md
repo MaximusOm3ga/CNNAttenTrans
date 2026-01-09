@@ -1,183 +1,222 @@
-# Temporal Token Optimization via Attention-Based CNNs for Multivariate Time-Series Forecasting
+# Learning Patch-Level Temporal Representations for Transformer-Based Time-Series Forecasting
 
-This repository contains the reference implementation used in research on temporal tokenization for multivariate time-series learning. We study sequence-to-sequence regression on a synthetic dataset and compare against standard neural baselines as well as a Transformer (Quantformer) trained on either raw features or CNN-extracted temporal tokens.
+This repository provides the reference implementation accompanying the paper  
+**“Learning Patch-Level Temporal Representations for Transformer-Based Time-Series Forecasting.”**
 
-## Task Definition
+The codebase includes several deep learning baselines, a classical ARIMA reference model, and a proposed **two-stage patch-based forecasting pipeline** that combines convolutional tokenization with Transformer-based sequence modelling.
 
-Each sample is a multivariate time series with per-timestep regression targets:
+---
 
-- Inputs: `X ∈ R^{N×T×F}` (samples × timesteps × features)
-- Targets: `Y ∈ R^{N×T}` (per-timestep scalar regression target)
+## Problem Setup
 
-All training and evaluation scripts in this repository assume this aligned sequence-to-sequence setting.
+We consider a supervised regression task on multivariate time-series data.
 
-## Code Organization
+### Data representation
 
-- `Transformer/dataset/`
-  - `data.py`: synthetic dataset generator
-  - `paper_dataset.pt`: synthetic training dataset (tensor dictionary `{X, Y}`)
-  - `paper_new_test.pt`: synthetic test dataset (tensor dictionary `{X, Y}`)
-- `Transformer/baselineGRU/`: GRU baseline (train/eval)
-- `Transformer/baselineLSTM/`: LSTM baseline (train/eval)
-- `Transformer/baselineTransModel/`: Transformer baseline (train/eval)
-- `Transformer/baselineQuantTransModel/`: Quantformer baseline trained on raw features
-- `Transformer/arima/`: ARIMA baseline (univariate baseline intended to operate on the target series)
-- `Transformer/proposed/`
-  - `modelCNN/`: DenseNet-style 1D CNN token encoder and token export
-  - `transformerModel/`: Optimized Transformer trained on CNN tokens and unseen evaluation
+- **Inputs**:
+
+  $$\mathbf{X} \in \mathbb{R}^{N \times T \times F}$$
+
+  where:
+
+  - $N$ is the number of samples,
+  - $T$ is the sequence length (timesteps),
+  - $F$ is the number of input features.
+
+- **Targets**:
+
+  $$\mathbf{Y} \in \mathbb{R}^{N \times T}$$
+
+  where each timestep has a scalar regression target.
+
+---
+
+## Patch-Level Learning (Proposed Method)
+
+The proposed method operates on **temporal patches** rather than individual timesteps.
+
+Given a patch size $P$:
+
+- Each sequence is segmented into
+
+  $$K = \left\lfloor \frac{T}{P} \right\rfloor$$
+
+  non-overlapping temporal patches.
+
+### Patch encoding
+
+A convolutional neural network (CNN) encodes each patch into a fixed-dimensional token embedding:
+
+- **Patch-level tokens**:
+
+  $$\mathbf{Z} \in \mathbb{R}^{N \times K \times D}$$
+
+Token-level self-attention is applied **after** convolutional encoding to refine patch representations before Transformer processing.
+
+### Patch-level targets
+
+For fair training and evaluation at the same temporal resolution, timestep-level targets are aggregated within each patch:
+
+- **Patch-level targets**:
+
+  $$\mathbf{Y}_{\text{patch}} \in \mathbb{R}^{N \times K}$$
+
+Aggregation is performed consistently (e.g., patch mean or last timestep).
+
+> **Important**  
+> The proposed method predicts **one value per patch (token)**, not per timestep.
+
+---
+
+## Repository Structure
+
+```text
+Transformer/
+├── dataset/
+│   ├── data.py
+│   ├── paper_dataset.pt
+│   └── paper_new_test.pt
+│
+├── baselineGRU/
+├── baselineLSTM/
+├── baselineTransModel/
+├── baselineQuantTransModel/
+├── arima/
+│
+└── proposed/
+    ├── modelCNN/
+    └── transformerModel/
+```
+
+---
 
 ## Environment Setup
 
-### Dependencies
-
-Dependencies are pinned in `Transformer/requirements.txt`.
-
-On Windows (PowerShell):
+Dependencies are specified in `Transformer/requirements.txt`.
 
 ```powershell
-cd C:\Users\sauri\PycharmProjects\PythonProject1
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r .\Transformer\requirements.txt
 ```
 
-Note: the requirements file pins a CUDA-enabled PyTorch build. If the specified CUDA build is incompatible with your system, install a compatible PyTorch build first, then install the remaining dependencies.
+---
 
 ## Synthetic Dataset
 
-Dataset files are stored under `Transformer/dataset/` as PyTorch tensor dictionaries:
+Datasets are stored as PyTorch dictionaries:
 
 ```text
 {"X": X, "Y": Y}
 ```
 
-To (re-)generate a dataset file using the provided synthetic generator:
+To regenerate the dataset:
 
 ```powershell
 cd .\Transformer\dataset
 python .\data.py
 ```
 
-## Baselines (Raw Features)
+---
 
-Many scripts use relative dataset paths (e.g., `../dataset/paper_dataset.pt`). For reproducibility, run each script from its corresponding folder, as shown below.
+## Baseline Models (Raw Feature Input)
 
-### GRU
+Baseline models operate directly on timestep-level inputs and produce per-timestep predictions.
 
-Train:
+> **Note**  
+> Metrics from these models are not directly comparable to patch-level metrics unless evaluated at the same resolution.
 
-```powershell
-cd .\Transformer\baselineGRU
-python .\training.py
-```
+### GRU / LSTM / Transformer / QuantFormer (raw features)
 
-Evaluate:
+Each baseline has its own training and evaluation scripts under:
 
-```powershell
-cd .\Transformer\baselineGRU
-python .\eval.py
-```
+- `Transformer/baseline*/`
 
-### LSTM
+Run scripts from their respective directories.
 
-Train:
-
-```powershell
-cd .\Transformer\baselineLSTM
-python .\training.py
-```
-
-Evaluate:
-
-```powershell
-cd .\Transformer\baselineLSTM
-python .\evaluation.py
-```
-
-### Transformer
-
-Train:
-
-```powershell
-cd .\Transformer\baselineTransModel
-python .\training.py
-```
-
-Evaluate:
-
-```powershell
-cd .\Transformer\baselineTransModel
-python .\modelEval.py
-```
-
-### Quantformer (Raw Features)
-
-Train:
-
-```powershell
-cd .\Transformer\baselineQuantTransModel
-python .\trans_train.py
-```
-
-Evaluate:
-
-```powershell
-cd .\Transformer\baselineQuantTransModel
-python .\transformer_eval.py
-```
+---
 
 ## ARIMA Baseline
 
-The ARIMA baseline is provided under `Transformer/arima/`.
+The ARIMA model is provided as a classical statistical reference.
+
+- Operates in a univariate setting using only the target series.
+- Uses rolling one-step-ahead forecasting.
+- Included for contextual comparison only.
 
 ```powershell
 cd .\Transformer\arima
 python .\eval.py
 ```
 
-## Proposed Method: CNN Temporal Tokens + Transformer
+---
 
-The proposed pipeline consists of:
+## Proposed Pipeline: CNN Tokens + Transformer (Patch-Level)
 
-1. Training a CNN-based token encoder (`DenseNetTokenEncoder`).
-2. Exporting per-timestep token embeddings for the training dataset.
-3. Training a Transformer model on token sequences.
-4. Evaluating on an unseen dataset by generating tokens with the trained encoder.
-
-### Stage A: Train the CNN token encoder
+### Stage A — Train CNN Patch Tokenizer
 
 ```powershell
 cd .\Transformer\proposed\modelCNN
 python .\training.py
 ```
 
-### Stage B: Export tokens
+Artifact:
+
+- `trained_encoder_new.pth`
+
+### Stage B — Export Tokens
 
 ```powershell
 cd .\Transformer\proposed\modelCNN
 python .\token_ex.py
 ```
 
-This produces `Transformer/proposed/transformerModel/synthetic_tokens.pt`.
+Output file contains:
 
-### Stage C: Train Transformer on tokens
+- `tokens`: $(N, K, D)$
+- `Y`: original timestep-level targets $(N, T)$
+- `meta`: metadata (including `patch_size`)
+
+### Stage C — Train Transformer on Tokens
 
 ```powershell
 cd .\Transformer\proposed\transformerModel
 python .\training.py
 ```
 
-### Stage D: Evaluate on the unseen dataset
+The model predicts one scalar per patch.
+
+### Stage D — Unseen Evaluation (Patch-Level)
 
 ```powershell
 cd .\Transformer\proposed\transformerModel
 python .\eval_unseen.py
 ```
 
-If `eval_unseen.py` uses an absolute path for encoder weights, update it to a valid local path (for example, `..\modelCNN\trained_encoder.pth`).
+---
 
-## Outputs and Metrics
+## Metrics
 
-Evaluation scripts report standard regression metrics, including MSE and MAE. Metrics are computed over all predicted timesteps and samples.
+For the proposed patch-level pipeline, metrics are computed over all patches:
 
+$$\mathrm{MSE}=\frac{1}{N K}\sum_{i=1}^{N}\sum_{k=1}^{K}\left(y_{i,k} - \hat{y}_{i,k}\right)^2$$
 
+$$\mathrm{MAE}=\frac{1}{N K}\sum_{i=1}^{N}\sum_{k=1}^{K}\left|y_{i,k} - \hat{y}_{i,k}\right|$$
+
+---
+
+## Reproducibility Notes
+
+- The patch size $P$ must be identical across:
+  - CNN training
+  - token export
+  - Transformer training
+  - evaluation
+- Mismatched patch sizes invalidate results.
+- Many scripts rely on relative paths; run them from their respective directories.
+
+---
+
+## Scope Note
+
+This repository supports methodological evaluation of patch-level temporal representations. It does not implement or claim real-world trading strategies.

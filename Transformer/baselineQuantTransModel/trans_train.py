@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from Transformer.proposed.transformerModel.quantformer import QuantFormer
+from Transformer.proposed.transformerModel.transformer import QuantFormer
 
 D_MODEL = 256
 NUM_HEADS = 16

@@ -6,7 +6,7 @@ from Transformer.proposed.modelCNN.data_load import train_loader, val_loader
 
 LR = 1e-3
 EPOCHS = 600
-PATCH_SIZE = 1
+PATCH_SIZE = 4
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,7 +93,7 @@ for epoch in range(epochs):
 
     if val_loss < best_val_loss:
         best_val_loss = val_loss
-        torch.save(model.encoder.state_dict(), "trained_encoder.pth")
+        torch.save(model.encoder.state_dict(), "trained_encoder_new.pth")
         print("Saved best encoder")
 
     scheduler.step()

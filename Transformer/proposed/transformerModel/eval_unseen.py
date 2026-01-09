@@ -1,66 +1,122 @@
+import os
 import torch
-from Transformer.proposed.modelCNN.model import DenseNetTokenEncoder
-from Transformer.proposed.transformerModel.quantformer import QuantFormer
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
-EMBED_DIM = 256
-D_MODEL = 256
-NUM_HEADS = 16
-NUM_LAYERS = 4
-D_FF = 512
-DROPOUT = 0.1
+from Transformer.proposed.modelCNN.model import DenseNetTokenEncoder
+from Transformer.proposed.transformerModel.transformer import QuantFormer
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-TEST_DATASET_PATH = "../../dataset/paper_new_test.pt"
-ENCODER_WEIGHTS   = r"C:\Coding\REPOS\QUANT_ALGORITHMS\Transformer\proposed\modelCNN\trained_encoder.pth"
-MODEL_WEIGHTS     = "quantformer_price.pt"
+DATA_PATH = "../../dataset/paper_new_test.pt"
+ENCODER_WEIGHTS = "../modelCNN/trained_encoder_new.pth"
+MODEL_WEIGHTS = "./quantformer_price_new.pt"
 
-data = torch.load(TEST_DATASET_PATH)
+PATCH_SIZE = 4
+EMBED_DIM = 256
 
-X_test = data["X"].float()
-Y_test = data["Y"].float()
+BATCH_SIZE = 32
 
-assert X_test.dim() == 3
-assert Y_test.dim() == 2
-assert X_test.size(0) == Y_test.size(0)
-assert X_test.size(1) == Y_test.size(1)
 
-N_test, T, F = X_test.shape
+def _reduce_y_to_patches(y: torch.Tensor, patch_size: int, reduction: str = "mean") -> torch.Tensor:
+    if y.dim() != 2:
+        raise ValueError(f"Expected y to be 2D (N,T), got {tuple(y.shape)}")
+    N, T = y.shape
+    P = T // patch_size
+    if P <= 0:
+        raise ValueError(f"Sequence too short T={T} for patch_size={patch_size}")
+    T_eff = P * patch_size
+    y_eff = y[:, :T_eff].contiguous().view(N, P, patch_size)
 
-encoder = DenseNetTokenEncoder(
-    input_size=F,
-    patch_size=1,
-    embed_dim=EMBED_DIM,
-)
+    if reduction == "mean":
+        return y_eff.mean(dim=-1)
+    if reduction == "last":
+        return y_eff[:, :, -1]
+    raise ValueError(f"Unknown reduction={reduction}")
 
-encoder.load_state_dict(torch.load(ENCODER_WEIGHTS, map_location=DEVICE))
-encoder.to(DEVICE)
-encoder.eval()
 
-with torch.no_grad():
-    tokens_test = encoder(X_test.to(DEVICE))
+@torch.no_grad()
+def _encode_tokens_batched(
+    encoder: nn.Module,
+    X: torch.Tensor,
+    batch_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    encoder.eval()
+    outs = []
+    dl = DataLoader(TensorDataset(X), batch_size=batch_size, shuffle=False)
+    for (xb,) in dl:
+        xb = xb.to(device, non_blocking=True)
+        tokens = encoder(xb)
+        outs.append(tokens.detach().cpu())
+    return torch.cat(outs, dim=0)
 
-model = QuantFormer(
-    input_dim=tokens_test.size(-1),
-    d_model=D_MODEL,
-    num_heads=NUM_HEADS,
-    num_layers=NUM_LAYERS,
-    d_ff=D_FF,
-    dropout=DROPOUT,
-    output_dim=1,
-).to(DEVICE)
 
-model.load_state_dict(torch.load(MODEL_WEIGHTS, map_location=DEVICE))
-model.eval()
+def main():
+    data = torch.load(DATA_PATH, map_location="cpu")
+    X = data["X"].float()
+    Y = data["Y"].float()
 
-with torch.no_grad():
-    preds = model(tokens_test)
+    if X.dim() != 3:
+        raise ValueError(f"Expected X to be 3D (N,T,F), got {tuple(X.shape)}")
+    if Y.dim() != 2:
+        raise ValueError(f"Expected Y to be 2D (N,T), got {tuple(Y.shape)}")
+    if X.size(0) != Y.size(0):
+        raise ValueError(f"N mismatch: X {tuple(X.shape)} vs Y {tuple(Y.shape)}")
 
-mse = ((preds - Y_test.to(DEVICE)) ** 2).mean().item()
-mae = (preds - Y_test.to(DEVICE)).abs().mean().item()
-rmse = mse ** 0.5
+    Yp = _reduce_y_to_patches(Y, patch_size=PATCH_SIZE, reduction="mean")
 
-print("Synthetic test evaluation (unseen dataset)")
-print(f"MSE :  {mse:.6f}")
-print(f"RMSE:  {rmse:.6f}")
-print(f"MAE :  {mae:.6f}")
+    encoder = DenseNetTokenEncoder(input_size=X.size(-1), patch_size=PATCH_SIZE, embed_dim=EMBED_DIM).to(DEVICE)
+    encoder.load_state_dict(torch.load(ENCODER_WEIGHTS, map_location=DEVICE))
+
+    tokens = _encode_tokens_batched(encoder, X, batch_size=BATCH_SIZE, device=DEVICE)
+
+    if tokens.dim() != 3:
+        raise RuntimeError(f"Expected tokens to be 3D (N,P,E), got {tuple(tokens.shape)}")
+    if tokens.size(0) != Yp.size(0):
+        raise RuntimeError(f"N mismatch: tokens {tuple(tokens.shape)} vs Yp {tuple(Yp.shape)}")
+    if tokens.size(1) != Yp.size(1):
+        raise RuntimeError(f"P mismatch: tokens P={tokens.size(1)} vs Yp P={Yp.size(1)}")
+
+    model = QuantFormer(
+        input_dim=tokens.size(-1),
+        d_model=256,
+        num_heads=16,
+        num_layers=4,
+        d_ff=512,
+        dropout=0.1,
+        output_dim=1,
+    ).to(DEVICE)
+    model.load_state_dict(torch.load(MODEL_WEIGHTS, map_location=DEVICE))
+    model.eval()
+
+    dl = DataLoader(TensorDataset(tokens, Yp), batch_size=BATCH_SIZE, shuffle=False)
+
+    mse_loss = nn.MSELoss(reduction="sum")
+    mae_loss = nn.L1Loss(reduction="sum")
+
+    total_mse, total_mae, total_count = 0.0, 0.0, 0
+    with torch.no_grad():
+        for xb, yb in dl:
+            xb = xb.to(DEVICE, non_blocking=True)
+            yb = yb.to(DEVICE, non_blocking=True)
+
+            preds = model(xb)
+            if preds.shape != yb.shape:
+                raise RuntimeError(f"Shape mismatch: preds {tuple(preds.shape)} vs y {tuple(yb.shape)}")
+
+            total_mse += mse_loss(preds, yb).item()
+            total_mae += mae_loss(preds, yb).item()
+            total_count += yb.numel()
+
+    mse = total_mse / total_count
+    mae = total_mae / total_count
+
+    print("CNN tokens \\(patched\\) → QuantFormer, per\\-patch evaluation")
+    print(f"patch_size: {PATCH_SIZE}")
+    print(f"MSE : {mse:.6f}")
+    print(f"MAE : {mae:.6f}")
+
+
+if __name__ == "__main__":
+    main()

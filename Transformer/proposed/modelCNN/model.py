@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 
 CNN_INPUT_SIZE = 6
-CNN_PATCH_SIZE = 1
+CNN_PATCH_SIZE = 4
 CNN_EMBED_DIM = 256
 CNN_GROWTH_RATE = 32
 CNN_NUM_DENSE_BLOCKS = 3
@@ -93,7 +93,7 @@ class TokenSelfAttention(nn.Module):
 
 
 class TokenDecoder(nn.Module):
-    def __init__(self, embed_dim=256, patch_size=1, output_size=6):
+    def __init__(self, embed_dim=256, patch_size=4, output_size=6):
         super().__init__()
         self.fc1 = nn.Linear(embed_dim, 128)
         self.fc2 = nn.Linear(128, patch_size * output_size)
@@ -108,7 +108,7 @@ class TokenDecoder(nn.Module):
 
 
 class AutoencoderTokenExtractor(nn.Module):
-    def __init__(self, input_size=6, patch_size=1, embed_dim=256):
+    def __init__(self, input_size=6, patch_size=4, embed_dim=256):
         super().__init__()
         self.encoder = DenseNetTokenEncoder(input_size, patch_size, embed_dim)
 
