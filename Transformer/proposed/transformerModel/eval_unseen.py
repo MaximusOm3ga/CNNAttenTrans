@@ -12,10 +12,14 @@ DATA_PATH = "../../dataset/paper_new_test.pt"
 ENCODER_WEIGHTS = "../modelCNN/trained_encoder_new.pth"
 MODEL_WEIGHTS = "./quantformer_price_new.pt"
 
-PATCH_SIZE = 4
+PATCH_SIZE = 8
 EMBED_DIM = 256
 
 BATCH_SIZE = 32
+
+PLOT_SAMPLES = 8
+
+FORECAST_HORIZON = 1
 
 
 def _reduce_y_to_patches(y: torch.Tensor, patch_size: int, reduction: str = "mean") -> torch.Tensor:
@@ -35,6 +39,27 @@ def _reduce_y_to_patches(y: torch.Tensor, patch_size: int, reduction: str = "mea
     raise ValueError(f"Unknown reduction={reduction}")
 
 
+def _make_forecast_pairs(tokens: torch.Tensor, y_patches: torch.Tensor, horizon: int):
+    if horizon <= 0:
+        raise ValueError(f"Expected horizon > 0, got {horizon}")
+    if tokens.dim() != 3:
+        raise ValueError(f"Expected tokens to be 3D (N,P,E), got {tuple(tokens.shape)}")
+    if y_patches.dim() != 2:
+        raise ValueError(f"Expected y_patches to be 2D (N,P), got {tuple(y_patches.shape)}")
+    if tokens.size(0) != y_patches.size(0) or tokens.size(1) != y_patches.size(1):
+        raise ValueError(
+            f"Expected tokens (N,P,*) and y_patches (N,P) to match, got "
+            f"{tuple(tokens.shape)} vs {tuple(y_patches.shape)}"
+        )
+    P = tokens.size(1)
+    if P <= horizon:
+        raise ValueError(f"Not enough patches P={P} for horizon={horizon}")
+
+    x_f = tokens[:, : P - horizon, :]
+    y_f = y_patches[:, horizon:]
+    return x_f, y_f
+
+
 @torch.no_grad()
 def _encode_tokens_batched(
     encoder: nn.Module,
@@ -50,6 +75,8 @@ def _encode_tokens_batched(
         tokens = encoder(xb)
         outs.append(tokens.detach().cpu())
     return torch.cat(outs, dim=0)
+
+
 
 
 def main():
@@ -71,15 +98,10 @@ def main():
 
     tokens = _encode_tokens_batched(encoder, X, batch_size=BATCH_SIZE, device=DEVICE)
 
-    if tokens.dim() != 3:
-        raise RuntimeError(f"Expected tokens to be 3D (N,P,E), got {tuple(tokens.shape)}")
-    if tokens.size(0) != Yp.size(0):
-        raise RuntimeError(f"N mismatch: tokens {tuple(tokens.shape)} vs Yp {tuple(Yp.shape)}")
-    if tokens.size(1) != Yp.size(1):
-        raise RuntimeError(f"P mismatch: tokens P={tokens.size(1)} vs Yp P={Yp.size(1)}")
+    tokens_f, Yp_f = _make_forecast_pairs(tokens, Yp, horizon=FORECAST_HORIZON)
 
     model = QuantFormer(
-        input_dim=tokens.size(-1),
+        input_dim=tokens_f.size(-1),
         d_model=256,
         num_heads=16,
         num_layers=4,
@@ -90,12 +112,14 @@ def main():
     model.load_state_dict(torch.load(MODEL_WEIGHTS, map_location=DEVICE))
     model.eval()
 
-    dl = DataLoader(TensorDataset(tokens, Yp), batch_size=BATCH_SIZE, shuffle=False)
+    dl = DataLoader(TensorDataset(tokens_f, Yp_f), batch_size=BATCH_SIZE, shuffle=False)
 
     mse_loss = nn.MSELoss(reduction="sum")
     mae_loss = nn.L1Loss(reduction="sum")
 
     total_mse, total_mae, total_count = 0.0, 0.0, 0
+    preds_all = []
+
     with torch.no_grad():
         for xb, yb in dl:
             xb = xb.to(DEVICE, non_blocking=True)
@@ -105,17 +129,22 @@ def main():
             if preds.shape != yb.shape:
                 raise RuntimeError(f"Shape mismatch: preds {tuple(preds.shape)} vs y {tuple(yb.shape)}")
 
+            preds_all.append(preds.detach().cpu())
+
             total_mse += mse_loss(preds, yb).item()
             total_mae += mae_loss(preds, yb).item()
             total_count += yb.numel()
 
+
     mse = total_mse / total_count
     mae = total_mae / total_count
 
-    print("CNN tokens \\(patched\\) → QuantFormer, per\\-patch evaluation")
-    print(f"patch_size: {PATCH_SIZE}")
+    print("CNN tokens \\(patched\\) \\→ QuantFormer, per\\-patch \\*forecast\\* evaluation")
+    print(f"patch\\_size: {PATCH_SIZE}")
+    print(f"forecast\\_horizon\\_patches: {FORECAST_HORIZON}")
     print(f"MSE : {mse:.6f}")
     print(f"MAE : {mae:.6f}")
+
 
 
 if __name__ == "__main__":

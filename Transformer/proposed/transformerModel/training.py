@@ -1,4 +1,3 @@
-# Transformer/proposed/transformerModel/training.py
 import os
 import math
 import torch
@@ -17,7 +16,8 @@ NUM_LAYERS = 4
 D_FF = 512
 DROPOUT = 0.1
 
-HERE = os.path.dirname(__file__)
+FORECAST_HORIZON = 1
+
 DEFAULT_TOKENS_PATH = "./synthetic_tokens_new.pt"
 DEFAULT_OUTPUT_PATH = "./quantformer_price_new.pt"
 
@@ -45,7 +45,7 @@ def _reduce_y_to_patches(y: torch.Tensor, P: int, patch_size: int, reduction: st
     if T < T_eff:
         raise ValueError(f"y too short: T={T} < T_eff={T_eff} (P={P}, patch_size={patch_size})")
 
-    y_eff = y[:, :T_eff].contiguous().view(B, P, patch_size)  # (B,P,S)
+    y_eff = y[:, :T_eff].contiguous().view(B, P, patch_size)
 
     if reduction == "mean":
         return y_eff.mean(dim=-1)
@@ -54,7 +54,26 @@ def _reduce_y_to_patches(y: torch.Tensor, P: int, patch_size: int, reduction: st
     raise ValueError(f"Unknown reduction={reduction}")
 
 
-def create_dataloaders(tokens_path: str, batch_size: int):
+def _make_forecast_pairs(tokens: torch.Tensor, y_patched: torch.Tensor, horizon: int):
+    if horizon <= 0:
+        raise ValueError(f"horizon must be > 0, got {horizon}")
+    if tokens.dim() != 3:
+        raise ValueError(f"tokens must be (N,P,E), got {tuple(tokens.shape)}")
+    if y_patched.dim() != 2:
+        raise ValueError(f"y_patched must be (N,P), got {tuple(y_patched.shape)}")
+    if tokens.size(0) != y_patched.size(0) or tokens.size(1) != y_patched.size(1):
+        raise ValueError(f"tokens/y_patched mismatch: {tuple(tokens.shape)} vs {tuple(y_patched.shape)}")
+
+    P = int(tokens.size(1))
+    if P <= horizon:
+        raise ValueError(f"Not enough patches P={P} for horizon={horizon}")
+
+    x_f = tokens[:, : P - horizon, :]
+    y_f = y_patched[:, horizon:]
+    return x_f, y_f
+
+
+def create_dataloaders(tokens_path: str, batch_size: int, horizon: int):
     obj = torch.load(tokens_path, map_location="cpu")
     tokens = obj["tokens"].float()
     Y = obj["Y"].float()
@@ -70,32 +89,36 @@ def create_dataloaders(tokens_path: str, batch_size: int):
     patch_size = int(meta.get("patch_size", 4))
     P = int(tokens.size(1))
 
-    # Align target to patch tokens: (N,T) -> (N,P)
     Y_patched = _reduce_y_to_patches(Y, P=P, patch_size=patch_size, reduction="mean")
 
     if _is_bad(tokens) or _is_bad(Y_patched):
         raise RuntimeError("Found NaNs/Infs in tokens or patched targets")
 
-    split = int(0.8 * tokens.size(0))
-    train_ds = TensorDataset(tokens[:split], Y_patched[:split])
-    val_ds = TensorDataset(tokens[split:], Y_patched[split:])
+    tokens_f, Y_f = _make_forecast_pairs(tokens, Y_patched, horizon=horizon)
+
+    split = int(0.8 * tokens_f.size(0))
+    train_ds = TensorDataset(tokens_f[:split], Y_f[:split])
+    val_ds = TensorDataset(tokens_f[split:], Y_f[split:])
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
 
-    input_dim = int(tokens.size(-1))
-    _log(f"Loaded tokens: {tuple(tokens.shape)} | Y: {tuple(Y.shape)} -> Y_patched: {tuple(Y_patched.shape)} | patch_size={patch_size}")
+    input_dim = int(tokens_f.size(-1))
+    _log(
+        f"Loaded tokens: {tuple(tokens.shape)} | Y: {tuple(Y.shape)} -> Y_patched: {tuple(Y_patched.shape)} | "
+        f"forecast: tokens_f {tuple(tokens_f.shape)} -> Y_f {tuple(Y_f.shape)} | patch_size={patch_size} | horizon={horizon}"
+    )
     return train_loader, val_loader, input_dim
 
 
 def train_quantformer_price(
     tokens_path: str = DEFAULT_TOKENS_PATH,
-    prices_path: str = "./prices.pt",
     output_path: str = DEFAULT_OUTPUT_PATH,
     context_len: int = CONTEXT_LEN,
     epochs: int = EPOCHS,
     batch_size: int = BATCH_SIZE,
     lr: float = LR,
+    horizon: int = FORECAST_HORIZON,
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     _log(f"Using device: {device}")
@@ -103,8 +126,16 @@ def train_quantformer_price(
     train_loader, val_loader, input_dim = create_dataloaders(
         tokens_path=tokens_path,
         batch_size=batch_size,
+        horizon=horizon,
     )
-    _log(f"Model input_dim={input_dim}, context_len={context_len}")
+
+    sample_tokens, _ = next(iter(train_loader))
+    P_eff = int(sample_tokens.size(1))
+    if context_len > P_eff:
+        _log(f"context_len={context_len} > available_patches={P_eff}; clamping.")
+        context_len = P_eff
+
+    _log(f"Model input_dim={input_dim}, context_len={context_len}, forecast_horizon={horizon}")
 
     model = QuantFormer(
         input_dim=input_dim,

@@ -6,7 +6,7 @@ from Transformer.proposed.modelCNN.data_load import train_loader, val_loader
 
 LR = 1e-3
 EPOCHS = 600
-PATCH_SIZE = 4
+PATCH_SIZE = 8
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -1,6 +1,6 @@
 import os
 import torch
-from Transformer.proposed.modelCNN.model import DenseNetTokenEncoder
+from Transformer.proposed.modelCNN.model import DenseNetTokenEncoder, CNN_PATCH_SIZE
 
 EMBED_DIM = 256
 
@@ -16,7 +16,7 @@ X = data["X"]
 if X.dim() != 3:
     raise ValueError(f"Expected X to be 3D (N, T, D), got {X.shape}")
 
-encoder = DenseNetTokenEncoder(input_size=X.shape[-1], patch_size=4, embed_dim=EMBED_DIM)
+encoder = DenseNetTokenEncoder(input_size=X.shape[-1], patch_size=CNN_PATCH_SIZE, embed_dim=EMBED_DIM)
 encoder.load_state_dict(torch.load(ENCODER_WEIGHTS, map_location="cpu"))
 encoder.eval()
 
@@ -29,7 +29,7 @@ torch.save(
         "Y": data["Y"],
         "meta": {
             "source": "synthetic",
-            "patch_size": 4,
+            "patch_size": CNN_PATCH_SIZE,
             "aligned": "timestep",
         },
     },
