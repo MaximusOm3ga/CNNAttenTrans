@@ -1,25 +1,21 @@
 # Learning Patch-Level Temporal Representations for Transformer-Based Time-Series Forecasting
 
-This repository provides the reference implementation accompanying the paper  
-**“Learning Patch-Level Temporal Representations for Transformer-Based Time-Series Forecasting.”**
+Reference implementation for the paper:
 
-The codebase includes several deep learning baselines, a classical ARIMA reference model, and the proposed **two-stage patch-based forecasting pipeline** that combines convolutional tokenization with Transformer-based sequence modeling.
+**Learning Patch-Level Temporal Representations for Transformer-Based Time-Series Forecasting**
 
----
+This repo contains:
 
-## Problem Setup
+- A synthetic dataset generator and packaged `.pt` datasets
+- Baseline models (e.g., TCN, PatchTST, GRU/LSTM/Transformer)
+- The proposed two-stage pipeline:
+  1) CNN patch tokenizer (autoencoder-style pretraining)
+  2) Transformer (QuantFormer) forecasting on exported patch tokens
 
-We consider supervised regression on multivariate time-series data.
+## Data / shapes
 
-### Data representation
-
-- **Inputs**: `X ∈ R^{N×T×F}`
-  - `N`: number of sequences (samples)
-  - `T`: sequence length (timesteps)
-  - `F`: number of input features
-
-- **Targets**: `Y ∈ R^{N×T}`
-  - One scalar regression target per timestep.
+- Inputs: `X ∈ R^{N×T×F}`
+- Targets: `Y ∈ R^{N×T}`
 
 Datasets are stored as PyTorch dictionaries:
 
@@ -27,80 +23,32 @@ Datasets are stored as PyTorch dictionaries:
 {"X": X, "Y": Y}
 ```
 
----
-
-## Proposed Method: Patch-Level Tokenization + Patch-Level Forecasting
-
-The proposed method operates on **non-overlapping temporal patches** rather than on individual timesteps.
-
-Given patch size `P`, each `T`-length sequence is segmented into:
-
-- `K = floor(T / P)` patches
-- effective length `T_eff = K * P` (the remainder, if any, is discarded)
-
-### Stage A — CNN patch tokenizer (autoencoder pretraining)
-
-A convolutional token encoder maps each patch to a `D`-dimensional embedding (token):
-
-- tokens: `Z ∈ R^{N×K×D}`
-
-In the current code, the tokenizer is trained as an **autoencoder**:
-
-- encoder: `X → Z`
-- decoder: `Z → reconstructed patches` with shape `R^{N×K×P×F}`
-
-After encoding, a lightweight **token-level self-attention** block refines patch representations before decoding.
-
-### Patch-level targets
-
-For training and evaluation at patch resolution, timestep targets are reduced to patch targets:
-
-- `Y_patch ∈ R^{N×K}`
-
-The current implementation uses a configurable reduction (e.g., patch mean or patch last timestep). In the provided scripts, patch mean is used.
-
-### Stage B — token export
-
-The trained CNN encoder is used to export tokens (`Z`) for all sequences, along with the original timestep targets (`Y`) and metadata (including patch size).
-
-### Stage C — QuantFormer on tokens (patch-level forecasting)
-
-The Transformer model consumes token sequences and predicts **one scalar per patch**, i.e. it outputs `Ŷ_patch ∈ R^{N×K}`.
-
-To perform forecasting rather than reconstruction, the code uses a rolling patch shift:
-
-- inputs: `Z[:, :K-h, :]`
-- targets: `Y_patch[:, h:]`
-
-where `h` is the forecast horizon in **patches** (default `h=1`).
-
----
-
-## Repository Structure
+## Repository structure
 
 ```text
 Paper/
-├── dataset/
-│   ├── data.py
-│   ├── paper_dataset.pt
-│   └── paper_new_test.pt
-│
-├── baselineGRU/
-├── baselineLSTM/
-├── baselineTransModel/
-├── baselineQuantTransModel/
-├── arima/
-│
-└── proposed/
-    ├── modelCNN/
-    └── transformerModel/
+  dataset/
+    data.py
+    paper_dataset.pt
+    paper_new_test.pt
+
+  baselineTCN/
+  baselinePatchTST/
+  Baseline_pertimestepDL/
+
+  proposed/
+    modelCNN/
+      training.py
+      token_ex.py
+    transformerModel/
+      training.py
+      eval_unseen.py
+    run_pipeline.py
 ```
 
----
+## Setup (Windows / PowerShell)
 
-## Environment Setup
-
-Dependencies are specified in `Paper/requirements.txt`.
+Dependencies live in `Paper/requirements.txt`.
 
 ```powershell
 python -m venv .venv
@@ -108,102 +56,60 @@ python -m venv .venv
 pip install -r .\Paper\requirements.txt
 ```
 
----
+## Dataset
 
-## Synthetic Dataset
-
-To regenerate the dataset:
+To regenerate the synthetic dataset:
 
 ```powershell
-cd .\Paper\dataset
-python .\data.py
+python .\Paper\dataset\data.py
 ```
 
----
+## Proposed pipeline (end-to-end)
 
-## Baseline Models (Raw Feature Input)
+The full sequence is:
 
-Baseline models operate directly on timestep-level inputs and typically produce per-timestep predictions.
+1. `Paper/proposed/modelCNN/training.py` (train CNN patch tokenizer)
+2. `Paper/proposed/modelCNN/token_ex.py` (export tokens to `.pt`)
+3. `Paper/proposed/transformerModel/training.py` (train QuantFormer)
+4. `Paper/proposed/transformerModel/eval_unseen.py` (evaluate on unseen set)
 
-> Note: Metrics from per-timestep models are not directly comparable to patch-level metrics unless the evaluation is performed at the same resolution.
+### Run everything sequentially
 
-Each baseline has its own training/evaluation scripts under:
-
-- `Paper/baseline*/`
-
-Run scripts from their respective directories.
-
----
-
-## Proposed Pipeline: CNN Tokens + QuantFormer (Patch-Level)
-
-### Stage A — Train CNN patch tokenizer
+Use the provided orchestrator which runs each step only after the previous one finishes successfully:
 
 ```powershell
-cd .\Paper\proposed\modelCNN
-python .\training.py
+python .\Paper\proposed\run_pipeline.py
 ```
 
-Output artifact:
+If any step fails (non-zero exit code), the pipeline stops and prints which step failed.
 
-- `trained_encoder_new.pth`
+### Run steps individually
 
-### Stage B — Export tokens
+You can run each script directly:
 
 ```powershell
-cd .\Paper\proposed\modelCNN
-python .\token_ex.py
+python .\Paper\proposed\modelCNN\training.py
+python .\Paper\proposed\modelCNN\token_ex.py
+python .\Paper\proposed\transformerModel\training.py
+python .\Paper\proposed\transformerModel\eval_unseen.py
 ```
 
-Output file (consumed by the Transformer stage):
+Tip: if you see import errors, run from the project root (the folder containing `README.md`) as shown above.
 
-- `Paper/proposed/transformerModel/synthetic_tokens_new.pt`
+## Baseline models
 
-It contains:
+Baselines live under `Paper/baseline*/` and `Paper/Baseline_pertimestepDL/`.
 
-- `tokens`: `Z` with shape `(N, K, D)`
-- `Y`: original timestep targets with shape `(N, T)`
-- `meta`: metadata including `patch_size`
+Typical usage is to `cd` into the baseline folder and run its `training.py` / `eval.py`.
 
-### Stage C — Train QuantFormer on tokens (patch-level forecast)
+## Metrics (patch-level forecasting)
 
-```powershell
-cd .\Paper\proposed\transformerModel
-python .\training.py
-```
-
-The model predicts one scalar per patch.
-
-### Stage D — Unseen evaluation (patch-level forecast)
-
-```powershell
-cd .\Paper\proposed\transformerModel
-python .\eval_unseen.py
-```
-
----
-
-## Metrics
-
-For patch-level forecasting, metrics are computed over all predicted patches:
+Metrics are computed over all predicted patches:
 
 - `MSE = (1/(N·K)) · Σ_i Σ_k (y_{i,k} − ŷ_{i,k})^2`
 - `MAE = (1/(N·K)) · Σ_i Σ_k |y_{i,k} − ŷ_{i,k}|`
 
----
+## Notes
 
-## Reproducibility Notes
-
-- The patch size `P` must be consistent across:
-  - CNN training (`Paper/proposed/modelCNN/training.py`)
-  - token export (`Paper/proposed/modelCNN/token_ex.py`)
-  - QuantFormer training (`Paper/proposed/transformerModel/training.py` reads `meta.patch_size`)
-  - evaluation (`Paper/proposed/transformerModel/eval_unseen.py`)
-- Mismatched patch sizes invalidate patch-level comparisons.
-- Several scripts rely on relative paths. Run them from their respective directories.
-
----
-
-## Scope Note
-
-This repository supports methodological evaluation of patch-level temporal representations. It does not implement or claim real-world trading strategies.
+- Patch size must be consistent across CNN training, token export, transformer training, and evaluation.
+- This repo is for methodological evaluation and does not implement real-world trading strategies.
