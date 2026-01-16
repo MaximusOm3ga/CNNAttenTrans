@@ -15,7 +15,7 @@ OUTPUT_PATH = "baseline_tcn.pt"
 
 PATCH_SIZE = 8
 PATCH_REDUCTION = "mean"
-FORECAST_HORIZON = 1  # in patches
+FORECAST_HORIZON = 1
 
 EPOCHS = 300
 BATCH_SIZE = 32
@@ -24,22 +24,20 @@ LR = 1e-3
 
 def train_tcn():
     data = torch.load(DATA_PATH)
-    X = data["X"].float()  # (N, T, F)
-    Y = data["Y"].float()  # (N, T)
+    X = data["X"].float()
+    Y = data["Y"].float()
 
-    # ---- Patch-level targets ----
     Y_patch = reduce_to_patches(
         Y,
         patch_size=PATCH_SIZE,
         reduction=PATCH_REDUCTION
-    )  # (N, K)
+    )
 
     if Y_patch.size(1) <= FORECAST_HORIZON:
         raise ValueError("Not enough patches for forecast horizon")
 
-    # ---- Forecast shift (PATCH LEVEL, Y ONLY) ----
     X_f = X
-    Y_f = Y_patch[:, FORECAST_HORIZON:]  # (N, K - h)
+    Y_f = Y_patch[:, FORECAST_HORIZON:]
 
     N = X_f.size(0)
     split = int(0.8 * N)
@@ -68,10 +66,8 @@ def train_tcn():
 
             optimizer.zero_grad(set_to_none=True)
 
-            # ---- Timestep predictions ----
-            preds_t = model(xb)  # (B, T)
+            preds_t = model(xb)
 
-            # ---- Reduce predictions to PATCH LEVEL ----
             preds_patch = reduce_to_patches(
                 preds_t,
                 patch_size=PATCH_SIZE,

@@ -1,6 +1,6 @@
 import os
 import torch
-from Transformer.proposed.modelCNN.model import DenseNetTokenEncoder, CNN_PATCH_SIZE
+from model import DenseNetTokenEncoder, CNN_PATCH_SIZE
 
 EMBED_DIM = 256
 

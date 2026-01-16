@@ -1,4 +1,3 @@
-# baselineTCN/eval.py
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -13,28 +12,25 @@ MODEL_PATH = "baseline_tcn.pt"
 
 PATCH_SIZE = 8
 PATCH_REDUCTION = "mean"
-FORECAST_HORIZON = 1  # in patches
+FORECAST_HORIZON = 1
 BATCH_SIZE = 32
 
 
 def evaluate_tcn():
     data = torch.load(DATA_PATH)
-    X = data["X"].float()  # (N, T, F)
-    Y = data["Y"].float()  # (N, T)
-
-    # ---- Patch-level targets ----
+    X = data["X"].float()
+    Y = data["Y"].float()
     Y_patch = reduce_to_patches(
         Y,
         patch_size=PATCH_SIZE,
         reduction=PATCH_REDUCTION
-    )  # (N, K)
+    )
 
     if Y_patch.size(1) <= FORECAST_HORIZON:
         raise ValueError("Not enough patches for forecast horizon")
 
-    # ---- Patch-level forecast shift (Y only) ----
-    Y_f = Y_patch[:, FORECAST_HORIZON:]  # (N, K - h)
-    X_f = X                              # raw input
+    Y_f = Y_patch[:, FORECAST_HORIZON:]
+    X_f = X
 
     ds = TensorDataset(X_f, Y_f)
     dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=False)
@@ -55,15 +51,13 @@ def evaluate_tcn():
             xb = xb.to(DEVICE)
             yb = yb.to(DEVICE)
 
-            # ---- Timestep predictions ----
-            preds_t = model(xb)  # (B, T)
+            preds_t = model(xb)
 
-            # ---- Reduce to patch level ----
             preds_patch = reduce_to_patches(
                 preds_t,
                 patch_size=PATCH_SIZE,
                 reduction=PATCH_REDUCTION
-            )[:, FORECAST_HORIZON:]  # (B, K - h)
+            )[:, FORECAST_HORIZON:]
 
             if preds_patch.shape != yb.shape:
                 raise RuntimeError(

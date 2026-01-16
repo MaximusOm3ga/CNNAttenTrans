@@ -1,4 +1,3 @@
-# baselinePatchTST/model.py
 import torch
 import torch.nn as nn
 
@@ -10,12 +9,11 @@ class PatchEmbedding(nn.Module):
         self.proj = nn.Linear(patch_size * in_features, embed_dim)
 
     def forward(self, x):
-        # x: (B, T, F)
         B, T, F = x.shape
         P = T // self.patch_size
-        x = x[:, : P * self.patch_size, :]               # trim
-        x = x.view(B, P, self.patch_size * F)             # (B, P, P*F)
-        return self.proj(x)                               # (B, P, D)
+        x = x[:, : P * self.patch_size, :]
+        x = x.view(B, P, self.patch_size * F)
+        return self.proj(x)
 
 
 class PatchTST(nn.Module):
@@ -46,10 +44,9 @@ class PatchTST(nn.Module):
         self.head = nn.Linear(d_model, 1)
 
     def forward(self, x):
-        # x: (B, T, F)
-        z = self.patch_embed(x)          # (B, K, D)
+        z = self.patch_embed(x)
         K = z.size(1)
         z = z + self.pos_embed[:, :K]
-        h = self.encoder(z)              # (B, K, D)
-        y = self.head(h).squeeze(-1)     # (B, K)
+        h = self.encoder(z)
+        y = self.head(h).squeeze(-1)
         return y

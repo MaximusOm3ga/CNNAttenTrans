@@ -15,7 +15,7 @@ OUTPUT_PATH = "baseline_patchtst.pt"
 
 PATCH_SIZE = 8
 PATCH_REDUCTION = "mean"
-FORECAST_HORIZON = 1  # in patches
+FORECAST_HORIZON = 1
 
 EPOCHS = 300
 BATCH_SIZE = 32
@@ -24,8 +24,8 @@ LR = 1e-3
 
 def train_patchtst():
     data = torch.load(DATA_PATH)
-    X = data["X"].float()  # (N, T, F)
-    Y = data["Y"].float()  # (N, T)
+    X = data["X"].float()
+    Y = data["Y"].float()
 
     Y_patch = reduce_to_patches(Y, PATCH_SIZE, PATCH_REDUCTION)
 

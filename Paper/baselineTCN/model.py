@@ -1,4 +1,3 @@
-# baselineTCN/model.py
 import torch
 import torch.nn as nn
 
@@ -23,7 +22,7 @@ class TemporalBlock(nn.Module):
 
     def forward(self, x):
         out = self.conv1(x)
-        out = out[..., :x.size(-1)]  # causal crop
+        out = out[..., :x.size(-1)]
         out = self.relu(out)
         out = self.dropout(out)
 
@@ -63,8 +62,7 @@ class TCN(nn.Module):
         self.head = nn.Conv1d(in_ch, 1, kernel_size=1)
 
     def forward(self, x):
-        # x: (B, T, F)
-        x = x.transpose(1, 2)  # (B, F, T)
+        x = x.transpose(1, 2)
         h = self.network(x)
-        y = self.head(h)       # (B, 1, T)
-        return y.squeeze(1)    # (B, T)
+        y = self.head(h)
+        return y.squeeze(1)

@@ -4,9 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from Transformer.proposed.transformerModel.transformer import QuantFormer
+from transformer import QuantFormer
 
-CONTEXT_LEN = 10
 EPOCHS = 300
 BATCH_SIZE = 32
 LR = 1e-3
@@ -115,7 +114,6 @@ def create_dataloaders(tokens_path: str, batch_size: int, horizon: int):
 def train_quantformer_price(
     tokens_path: str = DEFAULT_TOKENS_PATH,
     output_path: str = DEFAULT_OUTPUT_PATH,
-    context_len: int = CONTEXT_LEN,
     epochs: int = EPOCHS,
     batch_size: int = BATCH_SIZE,
     lr: float = LR,
@@ -131,12 +129,6 @@ def train_quantformer_price(
     )
 
     sample_tokens, _ = next(iter(train_loader))
-    P_eff = int(sample_tokens.size(1))
-    if context_len > P_eff:
-        _log(f"context_len={context_len} > available_patches={P_eff}; clamping.")
-        context_len = P_eff
-
-    _log(f"Model input_dim={input_dim}, context_len={context_len}, forecast_horizon={horizon}")
 
     model = QuantFormer(
         input_dim=input_dim,
