@@ -4,7 +4,7 @@ import torch
 #seed: 42 for training set and 101 for test set
 
 class PaperDatasetGenerator:
-    def __init__(self, num_samples=1000, sequence_length=30, seed=101):
+    def __init__(self, num_samples=1000, sequence_length=30, seed=1):
         self.num_samples = num_samples
         self.sequence_length = sequence_length
         np.random.seed(seed)
@@ -82,5 +82,5 @@ if __name__ == "__main__":
     print(f"Shape: {X_torch.shape}")
     print(f"First timestep: {X_torch[0, 0]}")
     print(f"Features: [series1, series2, factor1, factor2, factor3, factor4]")
-    torch.save({'X': X_torch, 'Y': Y_torch}, 'paper_new_test.pt')
+    torch.save({'X': X_torch, 'Y': Y_torch}, 'paper_dataset.pt')
     print(f"\nSaved")
