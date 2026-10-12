@@ -49,11 +49,11 @@ def main():
     preds_t = torch.cat(preds_all, dim=0)
     y_t = torch.cat(y_all, dim=0)
 
-    # reduce to patch resolution (comparable to proposed)
+    # reduce to patch resolution (comparable to proposed_rl_ds)
     y_patch = reduce_to_patches(y_t, patch_size=PATCH_SIZE, reduction=PATCH_REDUCTION)
     pred_patch = reduce_to_patches(preds_t, patch_size=PATCH_SIZE, reduction=PATCH_REDUCTION)
 
-    # patch-level 1-patch-ahead forecast (match proposed FORECAST_HORIZON)
+    # patch-level 1-patch-ahead forecast (match proposed_rl_ds FORECAST_HORIZON)
     pred_patch_f, y_patch_f = make_patch_forecast_pairs(pred_patch, y_patch, horizon_patches=FORECAST_HORIZON_PATCHES)
 
     mse = ((pred_patch_f - y_patch_f) ** 2).mean().item()

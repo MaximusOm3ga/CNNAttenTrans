@@ -72,7 +72,7 @@ class PaperDatasetGenerator:
 
 if __name__ == "__main__":
     print("Generating dataset...")
-    gen = PaperDatasetGenerator(num_samples=1000, sequence_length=30, seed=42)
+    gen = PaperDatasetGenerator(num_samples=10000, sequence_length=160, seed=101)
     X, Y = gen.generate_dataset()
     X_torch, Y_torch = gen.to_torch(X, Y)
     print(f"\n✓ Dataset generated!")
@@ -82,5 +82,5 @@ if __name__ == "__main__":
     print(f"Shape: {X_torch.shape}")
     print(f"First timestep: {X_torch[0, 0]}")
     print(f"Features: [series1, series2, factor1, factor2, factor3, factor4]")
-    torch.save({'X': X_torch, 'Y': Y_torch}, 'paper_dataset.pt')
+    torch.save({'X': X_torch, 'Y': Y_torch}, 'paper_new_test.pt')
     print(f"\nSaved")

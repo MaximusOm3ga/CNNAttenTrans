@@ -1,8 +1,9 @@
+import math
+
+from baseline_utils import make_forecast_pairs,reduce_to_patches
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-
-from baseline_utils import reduce_to_patches
 from model import TCN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -20,17 +21,10 @@ def evaluate_tcn():
     data = torch.load(DATA_PATH)
     X = data["X"].float()
     Y = data["Y"].float()
-    Y_patch = reduce_to_patches(
-        Y,
-        patch_size=PATCH_SIZE,
-        reduction=PATCH_REDUCTION
+
+    X_f, Y_f = make_forecast_pairs(
+        X, Y, horizon=PATCH_SIZE * FORECAST_HORIZON
     )
-
-    if Y_patch.size(1) <= FORECAST_HORIZON:
-        raise ValueError("Not enough patches for forecast horizon")
-
-    Y_f = Y_patch[:, FORECAST_HORIZON:]
-    X_f = X
 
     ds = TensorDataset(X_f, Y_f)
     dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=False)
@@ -53,23 +47,16 @@ def evaluate_tcn():
 
             preds_t = model(xb)
 
-            preds_patch = reduce_to_patches(
-                preds_t,
-                patch_size=PATCH_SIZE,
-                reduction=PATCH_REDUCTION
-            )[:, FORECAST_HORIZON:]
+            preds_patch = reduce_to_patches(preds_t, PATCH_SIZE)
+            yb_patch = reduce_to_patches(yb, PATCH_SIZE)
 
-            if preds_patch.shape != yb.shape:
-                raise RuntimeError(
-                    f"Shape mismatch: preds {preds_patch.shape} vs y {yb.shape}"
-                )
-
-            total_mse += mse_loss(preds_patch, yb).item()
-            total_mae += mae_loss(preds_patch, yb).item()
-            total_count += yb.numel()
+            total_mse += mse_loss(preds_patch, yb_patch).item()
+            total_mae += mae_loss(preds_patch, yb_patch).item()
+            total_count += yb_patch.numel()
 
     mse = total_mse / total_count
     mae = total_mae / total_count
+    rmse = math.sqrt(mse)
 
     print("TCN baseline (raw X → patch-level forecasting)")
     print(f"patch_size: {PATCH_SIZE}")
@@ -77,7 +64,7 @@ def evaluate_tcn():
     print(f"forecast_horizon_patches: {FORECAST_HORIZON}")
     print(f"MSE : {mse:.6f}")
     print(f"MAE : {mae:.6f}")
-
+    print(f"RMSE : {rmse:.6f}")
 
 if __name__ == "__main__":
     evaluate_tcn()

@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import math
 
-from baseline_utils import reduce_to_patches
+from baseline_utils import reduce_to_patches, make_forecast_pairs
 from model import TCN
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -33,11 +33,8 @@ def train_tcn():
         reduction=PATCH_REDUCTION
     )
 
-    if Y_patch.size(1) <= FORECAST_HORIZON:
-        raise ValueError("Not enough patches for forecast horizon")
 
-    X_f = X
-    Y_f = Y_patch[:, FORECAST_HORIZON:]
+    X_f, Y_f = make_forecast_pairs(X, Y, horizon=PATCH_SIZE * FORECAST_HORIZON)
 
     N = X_f.size(0)
     split = int(0.8 * N)
@@ -67,19 +64,21 @@ def train_tcn():
             optimizer.zero_grad(set_to_none=True)
 
             preds_t = model(xb)
+            preds_patch = reduce_to_patches(preds_t, PATCH_SIZE)
+            yb_patch = reduce_to_patches(yb, PATCH_SIZE)
+            loss = criterion(preds_patch, yb_patch)
 
-            preds_patch = reduce_to_patches(
-                preds_t,
-                patch_size=PATCH_SIZE,
-                reduction=PATCH_REDUCTION
-            )[:, FORECAST_HORIZON:]
+            # preds_patch = reduce_to_patches(
+            #     preds_t,
+            #     patch_size=PATCH_SIZE,
+            #     reduction=PATCH_REDUCTION
+            # )[:, FORECAST_HORIZON:]
+            #
+            # if preds_patch.shape != yb.shape:
+            #     raise RuntimeError(
+            #         f"Shape mismatch: preds {preds_patch.shape} vs y {yb.shape}"
+            #     )
 
-            if preds_patch.shape != yb.shape:
-                raise RuntimeError(
-                    f"Shape mismatch: preds {preds_patch.shape} vs y {yb.shape}"
-                )
-
-            loss = criterion(preds_patch, yb)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -94,15 +93,11 @@ def train_tcn():
             for xb, yb in val_loader:
                 xb = xb.to(DEVICE)
                 yb = yb.to(DEVICE)
-
                 preds_t = model(xb)
-                preds_patch = reduce_to_patches(
-                    preds_t,
-                    patch_size=PATCH_SIZE,
-                    reduction=PATCH_REDUCTION
-                )[:, FORECAST_HORIZON:]
+                preds_patch = reduce_to_patches(preds_t, PATCH_SIZE)
+                yb_patch = reduce_to_patches(yb, PATCH_SIZE)
 
-                val_loss += criterion(preds_patch, yb).item() * xb.size(0)
+                val_loss += criterion(preds_patch, yb_patch).item() * xb.size(0)
 
         val_loss /= len(val_loader.dataset)
         scheduler.step()

@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from baseline_utils import reduce_to_patches
+from baseline_utils import reduce_to_patches, make_forecast_pairs
 from model import PatchTST
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,10 +27,18 @@ def train_patchtst():
     X = data["X"].float()
     Y = data["Y"].float()
 
-    Y_patch = reduce_to_patches(Y, PATCH_SIZE, PATCH_REDUCTION)
+    horizon_steps = PATCH_SIZE * FORECAST_HORIZON
+    X_f, Y_f_full = make_forecast_pairs(X, Y, horizon=horizon_steps)
+    T_in = int(X_f.size(1))
+    P_in = T_in // PATCH_SIZE
+    if P_in <= FORECAST_HORIZON:
+        raise ValueError(f"Not enough input patches P_in={P_in} for FORECAST_HORIZON={FORECAST_HORIZON}")
 
-    X_f = X
-    Y_f = Y_patch[:, FORECAST_HORIZON:]
+    P_target = P_in - FORECAST_HORIZON
+    T_target = P_target * PATCH_SIZE
+    Y_f_full = Y_f_full[:, :T_target]
+
+    Y_f = reduce_to_patches(Y_f_full, PATCH_SIZE, PATCH_REDUCTION)
 
     N = X_f.size(0)
     split = int(0.8 * N)
@@ -38,8 +46,8 @@ def train_patchtst():
     train_ds = TensorDataset(X_f[:split], Y_f[:split])
     val_ds = TensorDataset(X_f[split:], Y_f[split:])
 
-    train_loader = DataLoader(train_ds, BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_ds, BATCH_SIZE)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE)
 
     model = PatchTST(
         patch_size=PATCH_SIZE,
@@ -57,7 +65,8 @@ def train_patchtst():
         train_loss = 0.0
 
         for xb, yb in train_loader:
-            xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+            xb = xb.to(DEVICE)
+            yb = yb.to(DEVICE)
 
             optimizer.zero_grad(set_to_none=True)
             preds = model(xb)[:, :-FORECAST_HORIZON]
@@ -75,19 +84,20 @@ def train_patchtst():
         val_loss = 0.0
         with torch.no_grad():
             for xb, yb in val_loader:
-                xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+                xb = xb.to(DEVICE)
+                yb = yb.to(DEVICE)
                 preds = model(xb)[:, :-FORECAST_HORIZON]
                 val_loss += criterion(preds, yb).item() * xb.size(0)
 
         val_loss /= len(val_loader.dataset)
         scheduler.step()
 
-        print(f"Epoch {epoch+1:03d} | Train {train_loss:.6f} | Val {val_loss:.6f}")
+        print(f"Epoch {epoch + 1:03d} | Train {train_loss:.6f} | Val {val_loss:.6f}")
 
         if val_loss < best_val and math.isfinite(val_loss):
             best_val = val_loss
             torch.save(model.state_dict(), OUTPUT_PATH)
-            print("Saved best PatchTST baseline")
+            print("Saved best yet model")
 
     print("PatchTST training complete.")
 

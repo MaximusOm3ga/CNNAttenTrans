@@ -1,0 +1,12 @@
+__pycache__/
+.idea/
+.venv/
+*.pyc
+
+# Generated datasets and model weights
+*.pt
+*.pth
+*.ckpt
+
+# Raw electricity dataset
+Paper/RealDatasetsEval/ElecDS/electricityloaddiagrams20112014/

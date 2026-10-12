@@ -47,6 +47,10 @@ class PatchTST(nn.Module):
         z = self.patch_embed(x)
         K = z.size(1)
         z = z + self.pos_embed[:, :K]
-        h = self.encoder(z)
+        mask = torch.triu(
+            torch.ones(K, K, device=z.device),
+            diagonal=1
+        ).bool()
+        h = self.encoder(z, mask=mask)
         y = self.head(h).squeeze(-1)
         return y
