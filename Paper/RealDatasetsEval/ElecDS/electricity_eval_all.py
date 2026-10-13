@@ -36,9 +36,9 @@ def _load_windows():
         raise FileNotFoundError(f"Missing electricity windows dataset: {WINDOWS_PATH}")
     data = torch.load(WINDOWS_PATH, map_location="cpu")
     meta = data.get("meta", {})
-    if meta.get("normalization") != "train_only":
+    if meta.get("normalization") != "train_only" or "target_mean" not in meta:
         raise ValueError(
-            "Dataset was prepared with test leakage. Rebuild the ElecDS dataset using "
+            "Dataset was not prepared with train-only input and target normalization. Rebuild the ElecDS dataset using "
             "Paper/RealDatasetsEval/ElecDS/proposed_rl_ds/dataset_prep.py"
         )
 
@@ -112,8 +112,17 @@ def _train_tcn_model(train_X, train_Y, weights_path: Path, epochs: int = EPOCHS)
     horizon_steps = PATCH_SIZE * FORECAST_HORIZON_PATCHES
     X_f, Y_f_full = make_forecast_pairs(train_X, train_Y, horizon=horizon_steps)
     Y_f_patch = reduce_to_patches(Y_f_full, PATCH_SIZE, reduction="mean")
-    ds = TensorDataset(X_f, Y_f_patch)
-    dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True)
+    split = int(0.8 * X_f.size(0))
+    train_dl = DataLoader(
+        TensorDataset(X_f[:split], Y_f_patch[:split]),
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+    )
+    val_dl = DataLoader(
+        TensorDataset(X_f[split:], Y_f_patch[split:]),
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+    )
 
     model = TCN(input_dim=train_X.size(-1)).to(DEVICE)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -123,7 +132,7 @@ def _train_tcn_model(train_X, train_Y, weights_path: Path, epochs: int = EPOCHS)
     best_val = float("inf")
     for epoch in range(epochs):
         model.train()
-        for xb, yb in dl:
+        for xb, yb in train_dl:
             xb = xb.to(DEVICE)
             yb = yb.to(DEVICE)
 
@@ -138,23 +147,20 @@ def _train_tcn_model(train_X, train_Y, weights_path: Path, epochs: int = EPOCHS)
         scheduler.step()
 
         model.eval()
+        val_loss = 0.0
+        val_count = 0
         with torch.no_grad():
-            val_loss = 0.0
-            val_count = 0
-            for xb, yb in dl:
+            for xb, yb in val_dl:
                 xb = xb.to(DEVICE)
                 yb = yb.to(DEVICE)
-                pred = model(xb)
-                pred_patch = reduce_to_patches(pred, PATCH_SIZE, reduction="mean")
+                pred_patch = reduce_to_patches(model(xb), PATCH_SIZE, reduction="mean")
                 val_loss += criterion(pred_patch, yb).item() * yb.size(0)
                 val_count += yb.size(0)
-
-            if val_count:
-                val_loss /= val_count
-                if val_loss < best_val and math.isfinite(val_loss):
-                    best_val = val_loss
-                    weights_path.parent.mkdir(parents=True, exist_ok=True)
-                    torch.save(model.state_dict(), weights_path)
+        val_loss /= val_count
+        if val_loss < best_val and math.isfinite(val_loss):
+            best_val = val_loss
+            weights_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), weights_path)
 
     if not weights_path.exists():
         weights_path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,8 +217,17 @@ def _train_patchtst_model(train_X, train_Y, weights_path: Path, epochs: int = EP
     Y_f_full = Y_f_full[:, :T_target]
     Y_f = reduce_to_patches(Y_f_full, PATCH_SIZE, reduction="mean")
 
-    train_ds = TensorDataset(X_f, Y_f)
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    split = int(0.8 * X_f.size(0))
+    train_loader = DataLoader(
+        TensorDataset(X_f[:split], Y_f[:split]),
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+    )
+    val_loader = DataLoader(
+        TensorDataset(X_f[split:], Y_f[split:]),
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+    )
 
     model = PatchTST(
         patch_size=PATCH_SIZE,
@@ -243,22 +258,21 @@ def _train_patchtst_model(train_X, train_Y, weights_path: Path, epochs: int = EP
 
         scheduler.step()
         model.eval()
+        val_loss = 0.0
+        val_count = 0
         with torch.no_grad():
-            val_loss = 0.0
-            val_count = 0
-            for xb, yb in train_loader:
+            for xb, yb in val_loader:
                 xb = xb.to(DEVICE)
                 yb = yb.to(DEVICE)
                 preds = model(xb)[:, :-FORECAST_HORIZON_PATCHES]
                 val_loss += criterion(preds, yb).item() * yb.size(0)
                 val_count += yb.size(0)
 
-            if val_count:
-                val_loss /= val_count
-                if val_loss < best_val and math.isfinite(val_loss):
-                    best_val = val_loss
-                    weights_path.parent.mkdir(parents=True, exist_ok=True)
-                    torch.save(model.state_dict(), weights_path)
+        val_loss /= val_count
+        if val_loss < best_val and math.isfinite(val_loss):
+            best_val = val_loss
+            weights_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), weights_path)
 
     if not weights_path.exists():
         weights_path.parent.mkdir(parents=True, exist_ok=True)

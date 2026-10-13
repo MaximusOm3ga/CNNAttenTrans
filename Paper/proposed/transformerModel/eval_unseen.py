@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -130,14 +132,17 @@ def main():
             total_mae += mae_loss(preds, yb).item()
             total_count += yb.numel()
 
+
     mse = total_mse / total_count
     mae = total_mae / total_count
+    rmse = math.sqrt(mse)
 
     print("CNN tokens (patched) -> QuantFormer, per-patch *forecast* evaluation")
     print(f"patch_size: {PATCH_SIZE}")
     print(f"forecast_horizon_patches: {FORECAST_HORIZON}")
     print(f"MSE : {mse:.6f}")
     print(f"MAE : {mae:.6f}")
+    print(f"RMSE: {rmse:.6f}")
 
 
 if __name__ == "__main__":
