@@ -43,9 +43,13 @@ def main():
     train_flat = X_train.reshape(-1, X_train.shape[-1])
     mean = train_flat.mean(axis=0, keepdims=True)
     std = train_flat.std(axis=0, keepdims=True) + 1e-6
+    target_mean = Y_train.mean()
+    target_std = Y_train.std() + 1e-6
 
     X_train = (X_train - mean) / std
     X_test = (X_test - mean) / std
+    Y_train = (Y_train - target_mean) / target_std
+    Y_test = (Y_test - target_mean) / target_std
 
     torch.save(
         {
@@ -60,6 +64,8 @@ def main():
                 "features": NUM_FEATURES,
                 "target_col": TARGET_COL,
                 "normalization": "train_only",
+                "target_mean": float(target_mean),
+                "target_std": float(target_std),
             },
         },
         OUTPUT_PATH,

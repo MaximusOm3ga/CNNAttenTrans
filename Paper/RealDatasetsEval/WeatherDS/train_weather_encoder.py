@@ -20,13 +20,23 @@ PATCH_SIZE = 8
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def train_weather_encoder(epochs: int = 50, batch_size: int = 32, lr: float = 1e-3):
+def train_weather_encoder(
+    epochs: int = 50,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    max_train_windows: int = 4096,
+    max_val_windows: int = 1024,
+):
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Missing weather windows file: {DATA_PATH}. Run dataset_prep.py first.")
 
     data = torch.load(DATA_PATH, map_location="cpu")
     X_train = data["X_train"].float()
     X_val = data["X_val"].float()
+    if max_train_windows > 0:
+        X_train = X_train[:max_train_windows]
+    if max_val_windows > 0:
+        X_val = X_val[:max_val_windows]
     feature_dim = X_train.size(-1)
 
     train_loader = DataLoader(
@@ -49,6 +59,7 @@ def train_weather_encoder(epochs: int = 50, batch_size: int = 32, lr: float = 1e
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.SmoothL1Loss()
     best_val = float("inf")
+    scaler = torch.amp.GradScaler("cuda", enabled=DEVICE.type == "cuda")
 
     print(
         f"Starting weather encoder training on {DEVICE} | "
@@ -71,14 +82,17 @@ def train_weather_encoder(epochs: int = 50, batch_size: int = 32, lr: float = 1e
                 continue
             x_eff = xb[:, :num_patches * PATCH_SIZE, :]
             patches_target = x_eff.reshape(B, num_patches, PATCH_SIZE, D)
-            reconstructed, _ = model(x_eff)
+            optimizer.zero_grad(set_to_none=True)
+            with torch.autocast(device_type=DEVICE.type, enabled=DEVICE.type == "cuda"):
+                reconstructed, _ = model(x_eff)
+                loss = criterion(reconstructed, patches_target)
             if reconstructed.shape != patches_target.shape:
                 raise RuntimeError(f"shape mismatch: reconstructed {tuple(reconstructed.shape)} != target {tuple(patches_target.shape)}")
-            loss = criterion(reconstructed, patches_target)
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             train_loss += loss.item() * reconstructed.numel()
             train_elems += reconstructed.numel()
 
@@ -97,8 +111,9 @@ def train_weather_encoder(epochs: int = 50, batch_size: int = 32, lr: float = 1e
                     continue
                 x_eff = xb[:, :num_patches * PATCH_SIZE, :]
                 patches_target = x_eff.reshape(B, num_patches, PATCH_SIZE, D)
-                reconstructed, _ = model(x_eff)
-                loss = criterion(reconstructed, patches_target)
+                with torch.autocast(device_type=DEVICE.type, enabled=DEVICE.type == "cuda"):
+                    reconstructed, _ = model(x_eff)
+                    loss = criterion(reconstructed, patches_target)
                 val_loss += loss.item() * reconstructed.numel()
                 val_elems += reconstructed.numel()
         if val_elems > 0:
@@ -119,5 +134,13 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--max-train-windows", type=int, default=4096)
+    parser.add_argument("--max-val-windows", type=int, default=1024)
     args = parser.parse_args()
-    train_weather_encoder(epochs=args.epochs, batch_size=args.batch_size, lr=args.lr)
+    train_weather_encoder(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        max_train_windows=args.max_train_windows,
+        max_val_windows=args.max_val_windows,
+    )

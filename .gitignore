@@ -1,0 +1,11 @@
+*.pt
+*.pth
+*.ckpt
+
+Paper/RealDatasetsEval/ElecDS/electricityloaddiagrams20112014/
+Paper/RealDatasetsEval/PemsBayDS/
+Paper/RealDatasetsEval/WeatherDS/*_windows.pt
+
+__pycache__/
+.idea/
+.venv/

@@ -12,7 +12,7 @@ from Paper.proposed.modelCNN.model import DenseNetTokenEncoder
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "electricity_windows.pt"
-ENCODER_PATH = REPO_ROOT / "Paper" / "proposed" / "modelCNN" / "trained_encoder_new.pth"
+ENCODER_PATH = BASE_DIR / "electricity_encoder.pth"
 OUTPUT_PATH = BASE_DIR / "electricity_tokens.pt"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

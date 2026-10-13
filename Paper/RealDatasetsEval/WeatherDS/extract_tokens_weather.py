@@ -1,3 +1,4 @@
+import argparse
 import sys
 from pathlib import Path
 
@@ -19,7 +20,7 @@ PATCH_SIZE = 8
 EMBED_DIM = 256
 
 
-def encode_weather_tokens() -> None:
+def encode_weather_tokens(batch_size: int = 64) -> None:
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Missing weather windows dataset: {DATA_PATH}. Run dataset_prep.py first.")
     if not ENCODER_PATH.exists():
@@ -41,16 +42,33 @@ def encode_weather_tokens() -> None:
     encoder.load_state_dict(torch.load(ENCODER_PATH, map_location=DEVICE))
     encoder.eval()
 
-    def _encode(X):
-        dl = DataLoader(TensorDataset(X), batch_size=32, shuffle=False)
+    def _encode(name, X):
+        dl = DataLoader(
+            TensorDataset(X),
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=DEVICE.type == "cuda",
+        )
         outs = []
+        total = len(dl)
+        print(f"Encoding {name}: {len(X)} windows in {total} batches on {DEVICE}", flush=True)
         with torch.no_grad():
-            for (xb,) in dl:
-                outs.append(encoder(xb.to(DEVICE)).cpu())
+            for batch_idx, (xb,) in enumerate(dl, start=1):
+                xb = xb.to(DEVICE, non_blocking=True)
+                with torch.autocast(device_type=DEVICE.type, enabled=DEVICE.type == "cuda"):
+                    encoded = encoder(xb)
+                outs.append(encoded.float().cpu())
+                if batch_idx == 1 or batch_idx % 25 == 0 or batch_idx == total:
+                    print(
+                        f"{name}: batch {batch_idx}/{total} "
+                        f"({batch_idx / total:.0%})",
+                        flush=True,
+                    )
         return torch.cat(outs, dim=0)
 
-    tokens_train = _encode(X_train)
-    tokens_test = _encode(X_test)
+    tokens_train = _encode("train", X_train)
+    tokens_test = _encode("test", X_test)
 
     torch.save(
         {
@@ -72,4 +90,7 @@ def encode_weather_tokens() -> None:
 
 
 if __name__ == "__main__":
-    encode_weather_tokens()
+    parser = argparse.ArgumentParser(description="Extract CNN tokens for WeatherDS.")
+    parser.add_argument("--batch-size", type=int, default=64)
+    args = parser.parse_args()
+    encode_weather_tokens(batch_size=args.batch_size)

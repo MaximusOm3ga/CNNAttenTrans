@@ -13,6 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CSV_PATH = BASE_DIR / "Dataset" / "weather.csv"
 OUTPUT_PATH = BASE_DIR / "weather_windows.pt"
 WINDOW = 1024
+WINDOW_STRIDE = 16
 TARGET_NAME = "OT"
 
 
@@ -30,7 +31,7 @@ def build_weather_windows() -> dict:
     Y = df[TARGET_NAME].to_numpy(dtype=np.float32)
 
     X_windows, Y_windows = [], []
-    for i in range(0, X.shape[0] - WINDOW + 1):
+    for i in range(0, X.shape[0] - WINDOW + 1, WINDOW_STRIDE):
         X_windows.append(X[i:i + WINDOW])
         Y_windows.append(Y[i:i + WINDOW])
 
@@ -50,6 +51,7 @@ def build_weather_windows() -> dict:
         "feature_names": feature_cols,
         "target_name": TARGET_NAME,
         "window": WINDOW,
+        "stride": WINDOW_STRIDE,
     }
 
     torch.save(data, OUTPUT_PATH)
